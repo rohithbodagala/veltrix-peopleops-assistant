@@ -1,0 +1,24 @@
+services:
+  assistant:
+    build: .
+    image: veltrix-peopleops-assistant
+    ports:
+      - "8000:8000"
+    volumes:
+      # Replaced by the evaluators' copy: data/corpus, data/manifest.json, data/veltrix.db
+      - ./data:/app/data
+    environment:
+      # Paths inside the container (./data is mounted at /app/data).
+      CORPUS_DIR: /app/data/corpus
+      MANIFEST_PATH: /app/data/manifest.json
+      DB_PATH: /app/data/veltrix.db
+      APP_TODAY: ${APP_TODAY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      LLM_MODEL: ${LLM_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      EMBEDDINGS: ${EMBEDDINGS:-on}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-20}
+      REQUEST_DEADLINE_SECONDS: ${REQUEST_DEADLINE_SECONDS:-27}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: ${LOG_FILE:-}
