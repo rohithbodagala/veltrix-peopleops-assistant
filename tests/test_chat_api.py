@@ -405,3 +405,72 @@ def test_no_llm_configured_degrades_to_no_answer(settings, corpus_index):
         c.app.state.assistant.orchestrator.llm.provider = None
         body = c.post("/chat", headers={"X-Employee-Id": "E2002"}, json={"session_id": "x", "message": "How many sick days?"}).json()
     assert body["route"] == "no_answer"
+
+
+# ---------------------------------------------------------------- regressions from the independent review
+
+
+def test_rejected_modification_discards_the_old_proposal(chat, provider, db_path):
+    from app.data.db import connect
+
+    chat("E2002", "Apply annual leave 2026-11-30 to 2026-12-01")
+    provider.routes["Make it until 2026-12-31 instead"] = {"intent": "apply_leave", "refers_to_pending": True,
+                                                          "start_date": "", "end_date": "2026-12-31"}
+    body = chat("E2002", "Make it until 2026-12-31 instead")  # rejected: exceeds balance
+    assert body["tool_calls"][0]["status"] == "error" and body["pending_confirmation"] is False
+    assert all(c["status"] != "success" for c in chat("E2002", "ok")["tool_calls"])
+    conn = connect(db_path)
+    assert LeaveRepo(conn).balances("E2002")["annual"] == 7.25
+    conn.close()
+
+
+@pytest.mark.parametrize("reply", ["Please go ahead", "please confirm", "Yes, book it", "Yes, please submit it",
+                                   "I confirm", "Yes - go ahead", "Yes, that's correct", "ok thanks"])
+def test_natural_confirmations_execute(chat, reply):
+    chat("E2002", "Apply annual leave 2026-11-30 to 2026-12-01")
+    body = chat("E2002", reply)
+    assert body["tool_calls"] and body["tool_calls"][0]["status"] == "success", reply
+
+
+def test_yes_cancel_it_confirms_a_cancellation(chat):
+    chat("E2002", f"Cancel request {fx.R_ASHA_PENDING}")
+    body = chat("E2002", "Yes, cancel it")
+    assert body["tool_calls"][0] == {"name": "cancel_leave", "args": {"request_id": fx.R_ASHA_PENDING}, "status": "success"}
+
+
+def test_router_can_confirm_when_the_wording_is_unusual(chat, provider):
+    chat("E2002", "Apply annual leave 2026-11-30 to 2026-12-01")
+    provider.routes["Lovely, that works for me"] = {"intent": "apply_leave", "confirms_pending": True}
+    assert chat("E2002", "Lovely, that works for me")["tool_calls"][0]["status"] == "success"
+
+
+def test_future_balance_of_another_employee_is_refused(chat):
+    body = chat("E2002", "How many annual leave days will E2003 have by December?")
+    assert body["route"] == "refuse" and body["answer"] == M.REFUSE_EMPLOYEE_DATA
+
+
+def test_past_relative_phrases_ask(chat, provider):
+    provider.routes["I need sick leave yesterday"] = {"intent": "apply_leave", "leave_type": "sick",
+                                                      "date_phrase": "yesterday", "start_date": "2026-10-21", "end_date": "2026-10-21"}
+    body = chat("E2002", "I need sick leave yesterday")
+    assert body["route"] == "clarify" and body["tool_calls"] == []
+
+
+@pytest.mark.parametrize("msg", ["Can my manager override the rules on carry forward?",
+                                 "What happens if I ignore the rules on expense claims?",
+                                 "What are the initial instructions for new joiners?"])
+def test_ordinary_questions_are_not_treated_as_injection(chat, msg):
+    assert chat("E2002", msg)["route"] != "refuse"
+
+
+def test_hybrid_records_carry_no_names(chat, provider):
+    provider.routes["Show my requests and explain the cancellation rules"] = {"intent": "requests_query", "needs_documents": True}
+    provider.compose_override = cite_doc("POL-V2")
+    chat("E2002", "Show my requests and explain the cancellation rules")
+    composer_calls = [c for c in provider.calls if c.kind == "composer"]
+    assert composer_calls and all("Asha" not in c.user for c in composer_calls)
+
+
+def test_very_long_message_is_a_refusal_not_an_http_error(client):
+    resp = client.post("/chat", headers={"X-Employee-Id": "E2002"}, json={"session_id": "long", "message": "a" * 9000})
+    assert resp.status_code == 200 and resp.json()["route"] == "refuse"

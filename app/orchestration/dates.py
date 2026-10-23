@@ -48,12 +48,15 @@ def _clean(phrase: str) -> str:
     p = phrase.lower().strip()
     p = re.sub(r"[?.!,]", " ", p)
     p = re.sub(r"\bday\s+after\s+tomorrow\b", "overmorrow", p)
+    p = re.sub(r"\bday\s+before\s+yesterday\b", "before yesterday", p)
     p = re.sub(r"\b(from|on|the|of|day|days|please|leave|off|for|instead)\b", " ", p)
     return re.sub(r"\s+", " ", p).strip()
 
 
 def _single(p: str, today: date) -> DateResolution:
     """One-day expressions."""
+    if p in ("yesterday", "before yesterday") or re.fullmatch(rf"last\s+{_WD}|last week|previous week", p):
+        return DateResolution("past", reason=f"'{p}' is in the past")
     if p == "today":
         return DateResolution("ok", today, today)
     if p == "tomorrow":
@@ -92,6 +95,8 @@ def resolve_phrase(phrase: str, today: date, anchor: date | None = None) -> Date
     p = _clean(phrase)
     if not p:
         return DateResolution("unrecognized")
+    if p in ("last week", "previous week"):
+        return DateResolution("past", reason=f"'{p}' is in the past")
     if p == "next week":
         mon = _monday(today) + timedelta(days=7)
         return DateResolution("ok", mon, mon + timedelta(days=4))

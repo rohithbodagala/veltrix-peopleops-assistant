@@ -40,7 +40,8 @@ class FastEmbedEmbedder:
         self._model = TextEmbedding(MODEL_NAME, cache_dir=str(cache_dir), local_files_only=True)
 
     def embed_passages(self, texts: list[str]) -> np.ndarray:
-        return _normalize(np.array(list(self._model.passage_embed(texts)), dtype=np.float32))
+        # Small batches: the default (256 x 512-token padding) needs ~2.4 GB RAM and is slower on CPU.
+        return _normalize(np.array(list(self._model.passage_embed(texts, batch_size=16)), dtype=np.float32))
 
     def embed_query(self, text: str) -> np.ndarray:
         return _normalize(np.array(list(self._model.query_embed([text])), dtype=np.float32))[0]

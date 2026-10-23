@@ -150,27 +150,32 @@ class Orchestrator:
     def _handle(self, t: Turn) -> ChatResult:
         session = t.session
         pending = session.pending
+        # A proposal lives for exactly one following message: it is executed, replaced by
+        # a new proposal, or discarded -- also when that message fails or is rejected.
+        session.pending = None
         if pending is not None:
-            if is_confirmation(t.message):
-                session.pending = None
+            if is_confirmation(t.message, pending.kind):
                 return self._execute(t, pending)
             if is_negation(t.message):
-                session.pending = None
                 return _clarify(M.PROPOSAL_DISCARDED)
         if is_manipulation(t.message):
-            session.pending = None
             return ChatResult(M.REFUSE_MANIPULATION, "refuse", intent="manipulation")
 
         r = route(self.llm, today=t.today, history=list(session.history), pending=pending,
                   message=t.message, deadline=t.deadline, request_id=t.request_id)
-        keeps_pending = pending is not None and r.refers_to_pending and r.intent in ("apply_leave", "cancel_leave")
-        if not keeps_pending:
-            session.pending = None
-            pending = None
-
-        result = self._dispatch(t, r, pending)
+        if pending is not None and r.confirms_pending and not self._changes_proposal(r, pending):
+            return self._execute(t, pending)
+        modifies = pending is not None and r.refers_to_pending and r.intent == pending.kind
+        result = self._dispatch(t, r, pending if modifies else None)
         result.intent = r.intent
         return result
+
+    @staticmethod
+    def _changes_proposal(r: RouterOutput, pending: Proposal) -> bool:
+        if pending.kind == "apply_leave":
+            return bool(r.start_date or r.end_date or r.date_phrase or r.half_day
+                        or (r.leave_type and r.leave_type != pending.args.get("leave_type")))
+        return bool(r.request_id and r.request_id != pending.args.get("request_id"))
 
     def _dispatch(self, t: Turn, r: RouterOutput, pending: Proposal | None) -> ChatResult:
         intent = r.intent
@@ -267,7 +272,8 @@ class Orchestrator:
             result, error = self._run_read_tool(t, "list_leave_requests", args)
             text = T.render_requests(result, t.requester, r.status_filter or None) if result else error
         if result and r.needs_documents:
-            composed = self._composed(t, r, t.today, {"tool_result": result})
+            records = {"tool_result": {k: v for k, v in result.items() if k != "full_name"}}
+            composed = self._composed(t, r, t.today, records)
             if composed.citations:
                 return ChatResult(composed.answer, "hybrid", composed.citations, t.calls)
         return ChatResult(text, "tool", tool_calls=t.calls)
@@ -410,16 +416,26 @@ class Orchestrator:
         return ChatResult(composed.answer, "rag", composed.citations)
 
     def _future_balance(self, t: Turn, r: RouterOutput) -> ChatResult:
-        args = {"employee_id": t.requester.employee_id}
+        who = resolve_target(r.target_kind, r.target_value, t.requester, EmployeeRepo(t.conn))
+        if who.status == "not_permitted":
+            return _refuse(M.REFUSE_EMPLOYEE_DATA)
+        if who.status == "ambiguous":
+            return _clarify(T.render_employee_choices(who.candidates))
+        if who.status == "not_found":
+            return _clarify("I couldn't find that employee. Could you give their employee ID?")
+        employee = who.employee
+        args = {"employee_id": employee.employee_id}
         if r.leave_type:
             args["leave_type"] = r.leave_type
         result, error = self._run_read_tool(t, "get_leave_balance", args)
         if result is None:
             return ChatResult(error, "tool", tool_calls=t.calls)
         target = parse_iso(r.target_date) or date(t.today.year, 12, 31)
-        join = date.fromisoformat(t.requester.join_date)
+        join = date.fromisoformat(employee.join_date)
         months = (t.today.year - join.year) * 12 + (t.today.month - join.month) - (1 if t.today.day < join.day else 0)
         records = {
+            "employee_id": employee.employee_id,
+            "employee_region": employee.region,
             "current_balance_days": result["balances"],
             "balance_note": "current remaining balance; pending and approved requests are already subtracted",
             "join_date": join.isoformat(),
@@ -430,5 +446,5 @@ class Orchestrator:
         composed = self._composed(t, r, t.today, records, extra_queries=["annual leave accrual per month", "carry forward unused annual leave"])
         if composed.citations and composed.coverage != "none":
             return ChatResult(composed.answer, "hybrid", composed.citations, t.calls)
-        text = T.render_balance(result, t.requester) + " The HR documents available don't let me project it further."
+        text = T.render_balance(result, t.requester) + " The HR documents don't let me project it further."
         return ChatResult(text, "tool", tool_calls=t.calls)

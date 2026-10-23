@@ -27,7 +27,7 @@ from app.orchestration.sessions import SessionOwnershipError, SessionStore
 from app.pii import NAMES
 
 logger = logging.getLogger("app.api")
-MAX_MESSAGE_CHARS = 4000
+MAX_MESSAGE_CHARS = 8000
 
 
 class AppState:
@@ -107,8 +107,6 @@ def create_app(
         session_id, message = body.get("session_id"), body.get("message")
         if not isinstance(session_id, str) or not session_id.strip() or not isinstance(message, str) or not message.strip():
             return JSONResponse(status_code=400, content={"detail": "session_id and message must be non-empty strings"})
-        if len(message) > MAX_MESSAGE_CHARS:
-            return JSONResponse(status_code=400, content={"detail": f"message longer than {MAX_MESSAGE_CHARS} characters"})
         try:
             session = state.sessions.get_or_create(session_id, requester.employee_id)
         except SessionOwnershipError:
@@ -118,6 +116,10 @@ def create_app(
             return JSONResponse(status_code=503, content={"detail": "service is starting"})
 
         request_id = str(uuid.uuid4())
+        if len(message) > MAX_MESSAGE_CHARS:  # a valid body, so a normal refusal rather than an HTTP error
+            return {"request_id": request_id, "route": "refuse", "citations": [], "tool_calls": [],
+                    "pending_confirmation": False,
+                    "answer": f"Your message is too long (over {MAX_MESSAGE_CHARS} characters). Please shorten it."}
 
         def run():
             with session.lock:

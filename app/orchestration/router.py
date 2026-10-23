@@ -12,20 +12,27 @@ from app.orchestration.dates import describe_calendar
 from app.orchestration.sessions import Proposal
 from app.pii import NAMES
 
-_YES = r"(yes|y|yep|yeah|yup|sure|ok|okay|confirm|confirmed|go ahead|do it|proceed|submit|submit it|correct|please do|yes please|absolutely|that's right|that is right|sounds good|looks good)"
-_POLITE = r"(please|thanks|thank you|go ahead|do it|confirm|proceed)"
-CONFIRM_RE = re.compile(rf"^\s*{_YES}(\s*[,!.]?\s*{_YES})*(\s*[,!.]?\s*{_POLITE})*\s*[.!]*\s*$", re.I)
 NEGATION_RE = re.compile(
     r"^\s*(no|nope|nah|no thanks|no thank you|don'?t|do not|stop|never ?mind|forget it|abort|not now)\s*[.!]*\s*$", re.I
 )
+# Only unambiguous attempts to change the assistant itself; everything else goes to the router.
 MANIPULATION_RE = re.compile(
-    r"(ignore|disregard|forget|override)\s+(all\s+|any\s+|your\s+|the\s+|my\s+)*(previous|prior|above|earlier|system)?\s*"
-    r"(instructions|rules|prompt|guidelines)"
-    r"|(system|developer|hidden|initial)\s+(prompt|instructions|message)"
-    r"|reveal\s+(your|the)\s+(prompt|instructions|rules|configuration)"
-    r"|jailbreak|developer mode|\bDAN\b|pretend (to be|you are)|you are now",
+    r"\b(ignore|disregard|forget)\s+(all\s+|any\s+)?(of\s+)?(your|previous|prior|above|earlier|these|the\s+above|the\s+previous)\s+"
+    r"(instructions|rules|prompts?|guidelines|directions)\b"
+    r"|\b(system|developer|hidden)\s+(prompt|instructions)\b"
+    r"|\breveal\s+(your|the)\s+(system\s+)?(prompt|instructions|configuration)\b"
+    r"|\bjailbreak|\bdeveloper mode\b|\bpretend (to be|you are)\b|\byou are now (a|an|in)\b",
     re.I,
 )
+# A confirmation is a short message made only of these words, containing at least one
+# affirmative word. "cancel" affirms only a pending cancellation.
+_CONFIRM_WORDS = set(
+    """yes yep yeah yup y sure ok okay k confirm confirmed confirming i go ahead please proceed do it submit
+    book apply that thats that's is correct right sounds looks good thanks thank you absolutely definitely
+    fine great perfect request leave the go-ahead approve approved""".split()
+)
+_AFFIRMATIVE = {"yes", "yep", "yeah", "yup", "y", "sure", "ok", "okay", "k", "confirm", "confirmed", "confirming",
+                "proceed", "ahead", "correct", "absolutely", "definitely", "submit", "book", "apply", "approve", "approved"}
 SKIP_CONFIRM_RE = re.compile(
     r"(don'?t|do not|no need to|without)\s+(ask(ing)?\s+(me\s+)?(to|for)\s+)?confirm|skip\s+(the\s+)?confirm", re.I
 )
@@ -33,8 +40,13 @@ EMP_ID_RE = re.compile(r"\b(E\d{3,})\b", re.I)
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 
 
-def is_confirmation(message: str) -> bool:
-    return bool(CONFIRM_RE.match(message))
+def is_confirmation(message: str, pending_kind: str = "") -> bool:
+    words = re.findall(r"[a-z]+(?:'[a-z]+)?", message.lower())
+    if not words or len(words) > 8:
+        return False
+    vocabulary = _CONFIRM_WORDS | ({"cancel", "cancellation"} if pending_kind == "cancel_leave" else set())
+    affirmative = _AFFIRMATIVE | ({"cancel"} if pending_kind == "cancel_leave" else set())
+    return all(w in vocabulary for w in words) and any(w in affirmative for w in words)
 
 
 def is_negation(message: str) -> bool:

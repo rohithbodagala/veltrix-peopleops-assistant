@@ -116,3 +116,16 @@ def test_missing_or_broken_file_does_not_stop_ingestion(settings, tmp_path, corp
     new_manifest.write_text(json.dumps(entries))
     index = ingest_all(replace(settings, manifest_path=new_manifest))
     assert index.stats["n_docs"] == 18 and index.stats["n_docs_ok"] == 17
+
+
+
+def test_holiday_dates_in_iso_and_numeric_formats():
+    from datetime import date
+
+    from app.ingestion.holidays import parse_date
+
+    assert parse_date("2026-07-03") == date(2026, 7, 3)  # ISO is never read day-first
+    assert parse_date("07/03/2026", dayfirst=False) == date(2026, 7, 3)
+    assert parse_date("07/03/2026", dayfirst=True) == date(2026, 3, 7)
+    assert parse_date("07/03/2026", dayfirst=True, weekday_hint="Friday") == date(2026, 7, 3)  # the row's weekday decides
+    assert parse_date("Thursday") is None and parse_date("3 July") is None  # no year: not trusted

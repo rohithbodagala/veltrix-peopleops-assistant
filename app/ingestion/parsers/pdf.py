@@ -150,10 +150,14 @@ def parse_pdf(path: Path) -> ParsedDoc:
             parsed.ocr_used = True
             continue
         spans = _spans(page)
-        try:
-            tables = page.find_tables().tables
-        except Exception:  # pragma: no cover - library edge cases
-            tables = []
+        tables = []
+        # The default table finder works from ruling lines; a page without vector
+        # drawings cannot contain a detectable table, and the finder is expensive.
+        if page.get_drawings():
+            try:
+                tables = page.find_tables().tables
+            except Exception:  # pragma: no cover - library edge cases
+                tables = []
         items: list[tuple[float, object]] = []
         table_bboxes = []
         for t in tables:

@@ -15,6 +15,10 @@ from app.ingestion.model import Block, DocMeta, Heading, HolidayEntry, Paragraph
 
 WEEKDAYS = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
             "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun"}
+WEEKDAY_INDEX = {name: i % 7 for i, name in enumerate(
+    ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+     "mon", "tue", "wed", "thu", "fri", "sat", "sun"])}
+WEEKDAY_INDEX.update({"tues": 1, "thur": 3, "thurs": 3})
 NOT_CLOSURE = re.compile(r"\b(restricted|optional|floating)\b", re.I)
 LINE_DATE = re.compile(
     r"^\s*[•\-*]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}\s+[A-Za-z]+\s+\d{4}|[A-Za-z]+\s+\d{1,2},?\s+\d{4})"
@@ -23,17 +27,36 @@ LINE_DATE = re.compile(
 _DEFAULT = datetime(1900, 1, 1)
 
 
-def parse_date(text: str) -> date | None:
+def parse_date(text: str, dayfirst: bool = True, weekday_hint: str = "") -> date | None:
+    """Parse a calendar date that states its year.
+
+    ISO dates are read as ISO. For numeric dates such as 07/03/2026 both orders are
+    tried; a weekday in the same row decides, otherwise `dayfirst` does."""
     text = text.strip()
-    if not text or not re.search(r"\d", text) or len(text) > 40:
+    if not text or not re.search(r"\d", text) or len(text) > 40 or not re.search(r"\b\d{4}\b", text):
         return None
-    try:
-        dt = dateparser.parse(text, dayfirst=True, default=_DEFAULT)
-    except (ValueError, OverflowError):
+    iso = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", text)
+    if iso:
+        try:
+            return date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
+        except ValueError:
+            return None
+    candidates = []
+    for first in (dayfirst, not dayfirst):
+        try:
+            dt = dateparser.parse(text, dayfirst=first, default=_DEFAULT)
+        except (ValueError, OverflowError):
+            continue
+        if dt.year >= 1990 and dt.date() not in candidates:
+            candidates.append(dt.date())
+    if not candidates:
         return None
-    if dt.year < 1990 or not re.search(r"\b\d{4}\b", text):
-        return None  # a date without an explicit year is not trusted
-    return dt.date()
+    wd = WEEKDAY_INDEX.get(weekday_hint.strip().lower().rstrip("."))
+    if wd is not None:
+        for c in candidates:
+            if c.weekday() == wd:
+                return c
+    return candidates[0]
 
 
 def _date_column(table: Table) -> int | None:
@@ -86,10 +109,12 @@ def extract_holidays(meta: DocMeta, blocks: list[Block]) -> list[HolidayEntry]:
             name_col = _name_column(block, date_col)
             label = " ".join([section] + (block.header or []))
             kind = "restricted" if NOT_CLOSURE.search(label) else "public"
+            dayfirst = "US" not in meta.regions  # month-first numeric dates are a US convention
             for row in block.rows:
                 if date_col >= len(row):
                     continue
-                day = parse_date(row[date_col])
+                hint = next((c for c in row if c.strip().lower().rstrip(".") in WEEKDAYS), "")
+                day = parse_date(row[date_col], dayfirst, hint)
                 if day is None:
                     continue
                 name = row[name_col] if name_col is not None and name_col < len(row) else ""

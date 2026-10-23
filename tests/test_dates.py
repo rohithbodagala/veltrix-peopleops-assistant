@@ -61,3 +61,8 @@ def test_reference_date_for_past_periods():
 def test_month_ends_between():
     assert month_ends_between(TODAY, D("2026-12-31")) == [D("2026-10-31"), D("2026-11-30"), D("2026-12-31")]
     assert month_ends_between(D("2026-10-31"), D("2026-11-30")) == [D("2026-11-30")]
+
+
+@pytest.mark.parametrize("phrase", ["yesterday", "last Friday", "last week", "the day before yesterday"])
+def test_past_phrases_are_reported_as_past(phrase):
+    assert resolve_phrase(phrase, TODAY).status == "past"

@@ -44,6 +44,7 @@ class RouterOutput(BaseModel):
     standalone_question: str = ""
     search_queries: list[str] = Field(default_factory=list)
     refers_to_pending: bool = False
+    confirms_pending: bool = False
 
 
 class ComposerOutput(BaseModel):
