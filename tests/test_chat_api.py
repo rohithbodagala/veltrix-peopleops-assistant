@@ -474,3 +474,8 @@ def test_hybrid_records_carry_no_names(chat, provider):
 def test_very_long_message_is_a_refusal_not_an_http_error(client):
     resp = client.post("/chat", headers={"X-Employee-Id": "E2002"}, json={"session_id": "long", "message": "a" * 9000})
     assert resp.status_code == 200 and resp.json()["route"] == "refuse"
+
+
+def test_other_employees_request_list_heading_is_capitalised(chat):
+    body = chat("E1001", "Show the leave requests of E3002")
+    assert body["answer"].startswith("Leave requests for Ben Ford (E3002):")

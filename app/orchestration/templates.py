@@ -51,7 +51,8 @@ def render_requests(result: dict, requester: Employee, status: str | None) -> st
     else:
         if not requests:
             return f"{_label(result)} has no {qualifier}leave requests."
-        heading = f"{qualifier.capitalize()}leave requests for {_label(result)}:"
+        heading = f"{qualifier}leave requests for {_label(result)}:"
+        heading = heading[0].upper() + heading[1:]
     return heading + "\n" + "\n".join(_request_line(r) for r in requests)
 
 
