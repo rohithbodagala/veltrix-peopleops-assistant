@@ -38,7 +38,7 @@ curl -s localhost:8000/chat -H 'Content-Type: application/json' -H 'X-Employee-I
   | `make install && make test` | Creates `.venv` and runs pytest. Uses a synthetic corpus and DB; `./data` is optional. The OCR tests need `tesseract`. |
   | `make docker-test` | Runs the same suite inside the image. |
   | `make run` | Runs the API locally without Docker. |
-  | `make smoke` | Plays a scripted conversation against a running server with a real key, and flags turns that don't match what the sample corpus should produce. |
+  | `make smoke` | Plays a scripted conversation against a running server with a real key, and flags turns that don't match what the sample corpus should produce. It waits for `/health` first, and stops with instructions if the service has no working LLM. |
 
 - **Environment variables:** all of them are listed in `.env.example`. Inside the container, `./data` is mounted at `/app/data`.
 

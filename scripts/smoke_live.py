@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -55,18 +57,53 @@ def post(base: str, employee: str, session: str, message: str) -> tuple[dict, fl
         method="POST",
     )
     started = time.monotonic()
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read()), time.monotonic() - started
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read()), time.monotonic() - started
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")[:200]
+        sys.exit(f"HTTP {exc.code} for [{employee}] {message!r}: {detail}")
+
+
+def wait_until_ready(base: str, timeout: float) -> None:
+    """`docker compose up -d` returns before ingestion finishes; /health is 503 until then."""
+    started = time.monotonic()
+    while True:
+        try:
+            with urllib.request.urlopen(f"{base}/health", timeout=5) as resp:
+                if resp.status == 200:
+                    print(f"service ready after waiting {time.monotonic() - started:.0f}s")
+                    return
+        except urllib.error.HTTPError as exc:
+            if exc.code != 503:
+                sys.exit(f"/health returned HTTP {exc.code}")
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            pass  # container still starting
+        if time.monotonic() - started > timeout:
+            sys.exit(f"service not ready after {timeout:.0f}s; check `docker compose logs`")
+        print("waiting for /health (ingestion in progress) ...", flush=True)
+        time.sleep(5)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://localhost:8000")
+    parser.add_argument("--wait", type=float, default=600, help="seconds to wait for /health")
     args = parser.parse_args()
+    wait_until_ready(args.base, args.wait)
     run_id = uuid.uuid4().hex[:6]
     flagged = 0
     for employee, message, routes, must, must_not in TURNS:
         body, seconds = post(args.base, employee, f"smoke-{run_id}-{employee}", message)
+        if "language service is unavailable" in body["answer"]:
+            sys.exit(
+                "\nThe service has no working LLM: no API key is configured, or the provider call failed.\n"
+                "  1. cp .env.example .env and set ONE of OPENAI_API_KEY / GOOGLE_API_KEY\n"
+                "  2. docker compose up -d --build\n"
+                "  3. make smoke\n"
+                "If a key is set, check `docker compose logs | grep llm_call` for the provider error.\n"
+                "(For a key-less dry run: LLM_PROVIDER=fake docker compose up -d. Answers then come from a stand-in.)"
+            )
         cited = {c["doc_id"] for c in body["citations"]}
         problems = []
         if body["route"] not in routes:
