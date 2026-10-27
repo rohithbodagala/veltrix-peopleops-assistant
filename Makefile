@@ -21,5 +21,5 @@ down:
 docker-test:  ## run the test suite inside the image (tesseract available there)
 	docker compose run --rm --no-deps -v $(CURDIR)/data:/app/data assistant python -m pytest -q -W ignore::DeprecationWarning
 
-smoke:  ## scripted conversation against a running server (needs a real LLM key)
+smoke:  ## scripted conversation against a running server (meaningful with a real LLM key)
 	$(PYTHON) scripts/smoke_live.py

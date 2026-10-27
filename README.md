@@ -14,7 +14,7 @@ The design rationale is in [DESIGN.md](DESIGN.md).
 ```bash
 cp .env.example .env          # then set ONE of OPENAI_API_KEY / GOOGLE_API_KEY
 # put the data in ./data: data/corpus/, data/manifest.json, data/veltrix.db
-docker compose up --build     # API on http://localhost:8000
+docker compose up --build     # API on http://localhost:8000 (no key: runs the offline stand-in)
 curl localhost:8000/health    # 503 while ingesting, then {"status":"ok"}
 ```
 
@@ -31,6 +31,9 @@ curl -s localhost:8000/chat -H 'Content-Type: application/json' -H 'X-Employee-I
   | OpenAI | `gpt-4.1` |
   | Gemini | `gemini-2.5-flash` |
 
+  - **No key at all:** `auto` runs `fake`, an offline stand-in, so the service still starts and every route, tool and permission check can be exercised. Its router only matches keywords and its answers quote the top-ranked excerpt, so they say nothing about answer quality. The log shows a `fake_llm_provider` warning.
+  - **A provider named explicitly without its key** (for example `LLM_PROVIDER=openai`) does not fall back. Questions that need the LLM then get an honest "unavailable" answer.
+
 - **Tests and local runs:**
 
   | Command | What it does |
@@ -38,7 +41,7 @@ curl -s localhost:8000/chat -H 'Content-Type: application/json' -H 'X-Employee-I
   | `make install && make test` | Creates `.venv` and runs pytest. Uses a synthetic corpus and DB; `./data` is optional. The OCR tests need `tesseract`. |
   | `make docker-test` | Runs the same suite inside the image. |
   | `make run` | Runs the API locally without Docker. |
-  | `make smoke` | Plays a scripted conversation against a running server with a real key, and flags turns that don't match what the sample corpus should produce. It waits for `/health` first, and stops with instructions if the service has no working LLM. |
+  | `make smoke` | Plays a scripted conversation against a running server with a real key, and flags turns that don't match what the sample corpus should produce. It waits for `/health` first, and stops with instructions if the service has no working LLM. Against the offline stand-in, about half the turns differ. |
 
 - **Environment variables:** all of them are listed in `.env.example`. Inside the container, `./data` is mounted at `/app/data`.
 

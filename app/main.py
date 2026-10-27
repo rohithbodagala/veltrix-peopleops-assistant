@@ -52,6 +52,9 @@ class AppState:
             if self.provider is None:
                 log_event(logger, "no_llm_provider", logging.WARNING,
                           hint="set LLM_PROVIDER and an API key; only regex-handled messages will work")
+            elif self.provider.name == "fake":
+                log_event(logger, "fake_llm_provider", logging.WARNING,
+                          hint="answers come from the offline keyword stand-in; set an API key for a real LLM")
             self.ready.set()
         except Exception as exc:  # keep the process alive and observable
             self.error = f"{type(exc).__name__}: {exc}"

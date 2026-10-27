@@ -6,6 +6,7 @@ Prints route, citations and tool calls per turn and flags turns whose route or c
 documents differ from what the shipped sample corpus should produce. The expectations
 are written for the sample data in ./data (APP_TODAY around October 2026); a modified
 corpus will legitimately differ. The apply/cancel turns modify ./data/veltrix.db.
+Without any API key the service runs the offline stand-in, and about half the turns differ.
 """
 from __future__ import annotations
 
@@ -97,12 +98,12 @@ def main() -> None:
         body, seconds = post(args.base, employee, f"smoke-{run_id}-{employee}", message)
         if "language service is unavailable" in body["answer"]:
             sys.exit(
-                "\nThe service has no working LLM: no API key is configured, or the provider call failed.\n"
+                "\nThe service has no working LLM: the selected provider has no API key, or the provider call failed.\n"
                 "  1. cp .env.example .env and set ONE of OPENAI_API_KEY / GOOGLE_API_KEY\n"
                 "  2. docker compose up -d --build\n"
                 "  3. make smoke\n"
                 "If a key is set, check `docker compose logs | grep llm_call` for the provider error.\n"
-                "(For a key-less dry run: LLM_PROVIDER=fake docker compose up -d. Answers then come from a stand-in.)"
+                "(With no key at all, LLM_PROVIDER=auto runs the offline stand-in. Its answers are crude.)"
             )
         cited = {c["doc_id"] for c in body["citations"]}
         problems = []

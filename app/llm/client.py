@@ -55,7 +55,8 @@ def build_provider(settings: Settings) -> Provider | None:
         elif settings.google_api_key:
             name = "gemini"
         else:
-            return None
+            # No key at all: run the offline stand-in so `docker compose up` works for a dry run.
+            name = "fake"
     if name == "openai" and settings.openai_api_key:
         from app.llm.providers.openai_ import OpenAIProvider
 
